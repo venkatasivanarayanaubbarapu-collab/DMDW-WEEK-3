@@ -1,0 +1,85 @@
+
+
+import pandas as pd
+import numpy as np
+
+from sklearn.datasets import load_iris
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import (
+    accuracy_score, cohen_kappa_score, confusion_matrix,
+    classification_report
+)
+
+# Load datasets
+iris = load_iris()
+datasets = {
+    "Iris": (
+        pd.DataFrame(iris.data, columns=iris.feature_names),
+        iris.target
+    )
+}
+
+# Load local CSV versions of Weather and Glass if available
+# Weather: weather.csv
+# Glass: glass.csv
+for name, filename in [
+    ("Weather", "weather.csv"),
+    ("Glass", "glass.csv")
+]:
+    try:
+        df = pd.read_csv(filename)
+        X = df.iloc[:, :-1]
+        y = LabelEncoder().fit_transform(df.iloc[:, -1].astype(str))
+        X = pd.get_dummies(X, drop_first=False)
+        datasets[name] = (X, y)
+    except FileNotFoundError:
+        print(f"{filename} not found; skipping {name} dataset.")
+
+# Classifiers
+classifiers = {
+    "ID3-style": DecisionTreeClassifier(criterion="entropy", random_state=42),
+    "J48-style": DecisionTreeClassifier(criterion="entropy",
+                                         min_samples_leaf=2,
+                                         random_state=42),
+    "Naive Bayes": GaussianNB(),
+    "k-NN (IBk-style)": make_pipeline(
+        StandardScaler(),
+        KNeighborsClassifier(n_neighbors=3)
+    )
+}
+
+# Evaluate
+for dataset_name, (X, y) in datasets.items():
+    X = X.copy()
+    X = X.apply(pd.to_numeric, errors="coerce")
+    X = X.fillna(X.mean()).fillna(0)
+
+    print("\\n" + "=" * 60)
+    print("DATASET:", dataset_name)
+    print("=" * 60)
+
+    cv = StratifiedKFold(n_splits=10, shuffle=True, random_state=42)
+
+    for model_name, model in classifiers.items():
+        predictions = cross_val_predict(model, X, y, cv=cv)
+
+        print("\\nClassifier:", model_name)
+        print("Accuracy:", round(accuracy_score(y, predictions) * 100, 2), "%")
+        print("Kappa:", round(cohen_kappa_score(y, predictions), 4))
+        print("Confusion Matrix:")
+        print(confusion_matrix(y, predictions))
+        print("Precision, Recall and F1-score:")
+        print(classification_report(y, predictions, zero_division=0))
+
+        model.fit(X, y)
+
+        if "Decision Tree" in model_name or "ID3-style" in model_name:
+            print("Decision Tree Rules:")
+            print(export_text(model, feature_names=list(X.columns)))
+
+print("\\nExperiment completed.")
